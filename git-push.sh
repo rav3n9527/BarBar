@@ -54,7 +54,7 @@ if [ "$CURRENT_REMOTE" != "$REPO_URL" ]; then
 fi
 
 # ---- 推送 --------------------------------------------------------------
-echo "⬆️  正在推送到 GitHub（分支 $BRANCH）..."
+echo "⬆️  正在推送到 GitHub（分支 ${BRANCH}）..."
 
 # 组装带 token 的推送 URL（仅当设置了 GITHUB_TOKEN 环境变量时）
 PUSH_URL="$REPO_URL"

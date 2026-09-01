@@ -1,0 +1,507 @@
+import Foundation
+import CoreGraphics
+
+/// 可从菜单切换的视觉效果模式。
+enum EffectMode: Int, CaseIterable {
+    case burst = 0
+    case ripple = 1
+    case rain = 2
+    case bounce = 3
+    case shockwave = 4
+    case laser = 5
+    case meteor = 6
+    case spectrum = 7
+    case fire = 8
+
+    var displayName: String {
+        switch self {
+        case .burst:     return "粒子爆炸"
+        case .ripple:    return "水波纹"
+        case .rain:      return "光雨"
+        case .bounce:    return "弹跳球"
+        case .shockwave: return "冲击波"
+        case .laser:     return "激光脉冲"
+        case .meteor:    return "流星"
+        case .spectrum:  return "频谱"
+        case .fire:      return "火焰"
+        }
+    }
+}
+
+/// 管理所有活动的粒子与波纹，负责生成与物理更新
+class ParticleSystem {
+    // MARK: - 配置
+    struct Config {
+        /// 每次按键生成的粒子数
+        var particlesPerKeypress: Int = 12
+        /// 每次按键生成的波纹数
+        var ripplesPerKeypress: Int = 1
+        /// 粒子寿命范围（秒）
+        var particleLife: ClosedRange<Float> = 0.6 ... 1.4
+        /// 波纹寿命（秒）
+        var rippleLife: Float = 0.8
+        /// 粒子的初始速度范围
+        var speedRange: ClosedRange<CGFloat> = 80 ... 220
+        /// 粒子半径范围
+        var radiusRange: ClosedRange<CGFloat> = 2 ... 5
+        /// 波纹最大半径
+        var maxRippleRadius: CGFloat = 60
+    }
+
+    var config = Config()
+
+    /// 当前视觉效果模式
+    var mode: EffectMode = .burst {
+        didSet { clear() }  // 切换模式时清除旧效果
+    }
+
+    // MARK: - 状态
+    private(set) var particles: [Particle] = []
+    private(set) var ripples: [Ripple] = []
+
+    /// 用于连击追踪的近期按键时间戳
+    private var recentPresses: [TimeInterval] = []
+    private let comboWindow: TimeInterval = 1.5
+
+    /// 当前连击数
+    var combo: Int { recentPresses.count }
+
+    /// BPS（每秒节拍数）——连击窗口内的每秒按键数
+    var keysPerSecond: Double {
+        guard recentPresses.count >= 2 else { return 0 }
+        let span = recentPresses.last! - recentPresses.first!
+        return span > 0 ? Double(recentPresses.count - 1) / span : 0
+    }
+
+    // MARK: - 调色板（霓虹 / 合成波）
+    static let baseColors: [CGColor] = [
+        CGColor(red: 1.0, green: 0.2, blue: 0.4, alpha: 1),   // 荧光粉红
+        CGColor(red: 0.3, green: 0.6, blue: 1.0, alpha: 1),   // 电光蓝
+        CGColor(red: 0.2, green: 1.0, blue: 0.6, alpha: 1),   // 霓虹绿
+        CGColor(red: 1.0, green: 0.8, blue: 0.1, alpha: 1),   // 金色
+        CGColor(red: 0.8, green: 0.3, blue: 1.0, alpha: 1),   // 紫色
+        CGColor(red: 1.0, green: 0.5, blue: 0.0, alpha: 1),   // 橙色
+    ]
+    private var colorIndex = 0
+
+    /// 从调色板中循环选取下一种颜色
+    private func nextColor() -> CGColor {
+        let c = Self.baseColors[colorIndex % Self.baseColors.count]
+        colorIndex += 1
+        return c
+    }
+
+    // MARK: - 生成
+
+    /// 在触控栏的指定 x 位置生成对应的效果
+    func spawn(at x: CGFloat, barHeight: CGFloat) {
+        let now = Date().timeIntervalSince1970
+        recentPresses.append(now)
+        recentPresses = recentPresses.filter { now - $0 < comboWindow }
+
+        switch mode {
+        case .burst:     spawnBurst(at: x, barHeight: barHeight)
+        case .ripple:    spawnRipple(at: x, barHeight: barHeight)
+        case .rain:      spawnRain(at: x, barHeight: barHeight)
+        case .bounce:    spawnBounce(at: x, barHeight: barHeight)
+        case .shockwave: spawnShockwave(at: x, barHeight: barHeight)
+        case .laser:     spawnLaser(at: x, barHeight: barHeight)
+        case .meteor:    spawnMeteor(at: x, barHeight: barHeight)
+        case .spectrum:  spawnSpectrum(at: x, barHeight: barHeight)
+        case .fire:      spawnFire(at: x, barHeight: barHeight)
+        }
+    }
+
+    /// 经典粒子爆炸 + 一个扩展圆环
+    private func spawnBurst(at x: CGFloat, barHeight: CGFloat) {
+        let color = nextColor()
+        let centerY = barHeight * 0.5
+
+        for _ in 0 ..< config.particlesPerKeypress {
+            let angle = CGFloat.random(in: 0 ..< .pi * 2)
+            let speed = CGFloat.random(in: config.speedRange)
+            let life = Float.random(in: config.particleLife)
+            let radius = CGFloat.random(in: config.radiusRange)
+
+            var p = Particle(
+                position: CGPoint(x: x, y: centerY),
+                velocity: CGPoint(x: cos(angle) * speed, y: sin(angle) * speed),
+                color: color,
+                alpha: 1.0,
+                radius: radius,
+                life: life,
+                maxLife: life,
+                born: Date().timeIntervalSince1970
+            )
+            p.gravity = 40
+            p.drag = 1.5
+            particles.append(p)
+        }
+
+        ripples.append(Ripple(
+            center: CGPoint(x: x, y: centerY),
+            radius: 0,
+            maxRadius: config.maxRippleRadius + CGFloat(combo) * 2,
+            color: color,
+            alpha: 0.8,
+            lineWidth: 3,
+            life: config.rippleLife,
+            maxLife: config.rippleLife
+        ))
+    }
+
+    /// 同心水波纹——多个宽度递减的圆环
+    private func spawnRipple(at x: CGFloat, barHeight: CGFloat) {
+        let color = nextColor()
+        let centerY = barHeight * 0.5
+        let now = Date().timeIntervalSince1970
+        let baseLife: Float = 0.9
+        let maxR = config.maxRippleRadius + CGFloat(combo) * 2
+
+        // 3 个错开的圆环
+        for i in 0 ..< 3 {
+            let idx = CGFloat(i)
+            ripples.append(Ripple(
+                center: CGPoint(x: x, y: centerY),
+                radius: 0,
+                maxRadius: maxR + idx * 14,
+                color: color,
+                alpha: 0.75 - idx * 0.12,
+                lineWidth: 3.2 - idx,
+                life: baseLife + Float(i) * 0.15,
+                maxLife: baseLife + Float(i) * 0.15,
+                delay: Float(i) * 0.15,
+                startRadius: 2 + idx * 4
+            ))
+        }
+
+        // 从落点向上飘散的少量火花
+        for _ in 0 ..< 4 {
+            let life = Float.random(in: 0.4 ... 0.8)
+            var p = Particle(
+                position: CGPoint(x: x + CGFloat.random(in: -4 ... 4), y: centerY),
+                velocity: CGPoint(x: CGFloat.random(in: -12 ... 12), y: CGFloat.random(in: 30 ... 70)),
+                color: color,
+                alpha: 0.9,
+                radius: 1.5,
+                life: life,
+                maxLife: life,
+                born: now
+            )
+            p.gravity = 0
+            p.drag = 0.5
+            particles.append(p)
+        }
+    }
+
+    /// 发光雨滴——粒子从顶部沿按下列下落
+    private func spawnRain(at x: CGFloat, barHeight: CGFloat) {
+        let color = nextColor()
+        let now = Date().timeIntervalSince1970
+
+        let dropCount = 8 + min(combo, 8)
+        for _ in 0 ..< dropCount {
+            let life = Float.random(in: 0.7 ... 1.2)
+            var p = Particle(
+                position: CGPoint(x: x + CGFloat.random(in: -10 ... 10), y: barHeight + CGFloat.random(in: 2 ... 6)),
+                velocity: CGPoint(x: CGFloat.random(in: -6 ... 6), y: CGFloat.random(in: -140 ... -60)),
+                color: color,
+                alpha: 0.9,
+                radius: CGFloat.random(in: 1.5 ... 3),
+                life: life,
+                maxLife: life,
+                born: now
+            )
+            p.gravity = 120   // 快速下落
+            p.drag = 0.1
+            p.growRate = 0
+            particles.append(p)
+        }
+    }
+
+    /// 弹跳发光球——在顶部生成，下落并在底面上弹跳
+    private func spawnBounce(at x: CGFloat, barHeight: CGFloat) {
+        let color = nextColor()
+        let now = Date().timeIntervalSince1970
+        let life = Float.random(in: 2.0 ... 3.0)
+
+        var p = Particle(
+            position: CGPoint(x: x, y: barHeight + CGFloat.random(in: 2 ... 6)),
+            velocity: CGPoint(x: CGFloat.random(in: -15 ... 15), y: 0),
+            color: color,
+            alpha: 1.0,
+            radius: CGFloat.random(in: 3.5 ... 5.5),
+            life: life,
+            maxLife: life,
+            born: now
+        )
+        p.gravity = 180
+        p.drag = 0.2
+        p.growRate = 0.05
+        p.bounces = true
+        p.floorY = 3
+        p.bounceRestitution = 0.8
+        particles.append(p)
+    }
+
+    // MARK: - 冲击波
+    /// 向外扩展的水平能量环——成对的波从按键处向左右扫过，
+    /// 并伴随明亮的中心闪光。
+    private func spawnShockwave(at x: CGFloat, barHeight: CGFloat) {
+        let color = nextColor()
+        let centerY = barHeight * 0.5
+        let now = Date().timeIntervalSince1970
+
+        // 向左和向右扩展的半环（用水平散开的粒子模拟）
+        for direction: CGFloat in [-1, 1] {
+            let life = Float.random(in: 0.5 ... 0.7)
+            var p = Particle(
+                position: CGPoint(x: x, y: centerY),
+                velocity: CGPoint(x: direction * CGFloat.random(in: 250 ... 420),
+                                  y: CGFloat.random(in: -6 ... 6)),
+                color: color,
+                alpha: 1.0,
+                radius: CGFloat.random(in: 3 ... 6),
+                life: life,
+                maxLife: life,
+                born: now
+            )
+            p.gravity = 0
+            p.drag = 0.3
+            p.growRate = 2.5   // 在移动过程中扩展
+            p.tailLength = 40  // 水平拖尾
+            particles.append(p)
+        }
+
+        // 明亮的中心闪光
+        var core = Particle(
+            position: CGPoint(x: x, y: centerY),
+            velocity: .zero,
+            color: color,
+            alpha: 1.0,
+            radius: 14,
+            life: 0.25,
+            maxLife: 0.25,
+            born: now
+        )
+        core.gravity = 0
+        core.drag = 0
+        core.growRate = 8
+        particles.append(core)
+
+        // 少量火花
+        for _ in 0 ..< 6 {
+            let angle = CGFloat.random(in: -0.6 ... 0.6)
+            let life = Float.random(in: 0.3 ... 0.5)
+            var s = Particle(
+                position: CGPoint(x: x, y: centerY),
+                velocity: CGPoint(x: cos(angle) * CGFloat.random(in: 150 ... 300),
+                                  y: sin(angle) * CGFloat.random(in: 30 ... 80)),
+                color: color,
+                alpha: 0.9,
+                radius: 1.5,
+                life: life,
+                maxLife: life,
+                born: now
+            )
+            s.gravity = 0
+            s.drag = 1.0
+            particles.append(s)
+        }
+    }
+
+    // MARK: - 激光
+    /// 垂直激光束——一束光从底部向上喷发，
+    /// 如同科幻能量光束。连击时发射双光束。
+    private func spawnLaser(at x: CGFloat, barHeight: CGFloat) {
+        let color = nextColor()
+        let now = Date().timeIntervalSince1970
+        let beamCount = combo >= 10 ? 2 : 1
+
+        for _ in 0 ..< beamCount {
+            let life = Float.random(in: 0.35 ... 0.5)
+            var p = Particle(
+                position: CGPoint(x: x + CGFloat.random(in: -2 ... 2), y: 0),
+                velocity: CGPoint(x: 0, y: CGFloat.random(in: 260 ... 380)),
+                color: color,
+                alpha: 1.0,
+                radius: CGFloat.random(in: 2.5 ... 3.5),
+                life: life,
+                maxLife: life,
+                born: now
+            )
+            p.gravity = -120   // 持续向上加速
+            p.drag = 0.2
+            p.growRate = 0
+            p.tailIsVertical = true
+            p.tailLength = barHeight * 2   // 光束从底部延伸到顶部之外
+            particles.append(p)
+        }
+
+        // 地面撞击光晕
+        var glow = Particle(
+            position: CGPoint(x: x, y: 0),
+            velocity: .zero,
+            color: color,
+            alpha: 0.8,
+            radius: 10,
+            life: 0.3,
+            maxLife: 0.3,
+            born: now
+        )
+        glow.gravity = 0
+        glow.growRate = 5
+        particles.append(glow)
+    }
+
+    // MARK: - 流星
+    /// 一颗炽热的流星拖着长长的彗尾划过触控栏，
+    /// 在按下列处生成。
+    private func spawnMeteor(at x: CGFloat, barHeight: CGFloat) {
+        let color = nextColor()
+        let now = Date().timeIntervalSince1970
+        let direction: CGFloat = Bool.random() ? 1 : -1
+        let startX = direction > 0 ? x - 20 : x + 20
+
+        for _ in 0 ..< 2 {
+            let life = Float.random(in: 0.7 ... 1.1)
+            var p = Particle(
+                position: CGPoint(x: startX, y: barHeight * CGFloat.random(in: 0.3 ... 0.7)),
+                velocity: CGPoint(x: direction * CGFloat.random(in: 300 ... 420),
+                                  y: CGFloat.random(in: -10 ... 10)),
+                color: color,
+                alpha: 1.0,
+                radius: CGFloat.random(in: 2.5 ... 4),
+                life: life,
+                maxLife: life,
+                born: now
+            )
+            p.gravity = 0
+            p.drag = 0.1
+            p.growRate = 0
+            p.tailLength = 90   // 长长的彗尾
+            particles.append(p)
+        }
+
+        // 拖尾余烬
+        for _ in 0 ..< 5 {
+            let life = Float.random(in: 0.4 ... 0.7)
+            var e = Particle(
+                position: CGPoint(x: startX - direction * 30, y: barHeight * CGFloat.random(in: 0.3 ... 0.7)),
+                velocity: CGPoint(x: direction * CGFloat.random(in: 200 ... 300),
+                                  y: CGFloat.random(in: -15 ... 15)),
+                color: color,
+                alpha: 0.8,
+                radius: CGFloat.random(in: 1 ... 2),
+                life: life,
+                maxLife: life,
+                born: now
+            )
+            e.gravity = 0
+            e.drag = 0.5
+            e.tailLength = 40
+            particles.append(e)
+        }
+    }
+
+    // MARK: - 频谱
+    /// 均衡器样式的垂直柱状条在按下列处喷发，每根都在闪烁，
+    /// 如同频谱分析仪。连击会增加柱条数量。
+    private func spawnSpectrum(at x: CGFloat, barHeight: CGFloat) {
+        let color = nextColor()
+        let now = Date().timeIntervalSince1970
+        let barCount = 5 + min(combo, 6)
+
+        for i in 0 ..< barCount {
+            let offset = CGFloat(i) * 6 - CGFloat(barCount / 2) * 6
+            let life = Float.random(in: 0.5 ... 0.8)
+            var p = Particle(
+                position: CGPoint(x: x + offset, y: 0),
+                velocity: CGPoint(x: 0, y: 0),
+                color: color,
+                alpha: 0.9,
+                radius: CGFloat.random(in: 1.5 ... 2.5),
+                life: life,
+                maxLife: life,
+                born: now
+            )
+            p.gravity = 0
+            p.drag = 0
+            p.growRate = 0
+            p.tailIsVertical = true
+            p.tailLength = barHeight * CGFloat.random(in: 0.5 ... 1.0)
+            particles.append(p)
+        }
+    }
+
+    // MARK: - 火焰
+    /// 熊熊火焰——粒子在按下列处点燃并向上飘升，
+    /// 闪烁的橙/红/蓝三色，如同喷灯。
+    private func spawnFire(at x: CGFloat, barHeight: CGFloat) {
+        let now = Date().timeIntervalSince1970
+        let flameCount = 14 + min(combo, 8)
+
+        for _ in 0 ..< flameCount {
+            let life = Float.random(in: 0.4 ... 0.8)
+            let heat = CGFloat.random(in: 0 ... 1)
+
+            // 火焰调色板：白热 → 黄色 → 橙色 → 红色 → 蓝色基底
+            let color: CGColor
+            if heat > 0.9 {
+                color = CGColor(red: 1.0, green: 1.0, blue: 0.9, alpha: 1)
+            } else if heat > 0.7 {
+                color = CGColor(red: 1.0, green: 0.9, blue: 0.3, alpha: 1)
+            } else if heat > 0.4 {
+                color = CGColor(red: 1.0, green: 0.5, blue: 0.1, alpha: 1)
+            } else if heat > 0.2 {
+                color = CGColor(red: 0.9, green: 0.2, blue: 0.05, alpha: 1)
+            } else {
+                color = CGColor(red: 0.2, green: 0.3, blue: 0.9, alpha: 1)
+            }
+
+            var p = Particle(
+                position: CGPoint(x: x + CGFloat.random(in: -8 ... 8), y: 0),
+                velocity: CGPoint(x: CGFloat.random(in: -12 ... 12),
+                                  y: CGFloat.random(in: 80 ... 200)),
+                color: color,
+                alpha: 0.95,
+                radius: CGFloat.random(in: 2 ... 4),
+                life: life,
+                maxLife: life,
+                born: now
+            )
+            p.gravity = 30    // 轻微的浮力牵引
+            p.drag = 1.8
+            p.growRate = 0.6
+            particles.append(p)
+        }
+    }
+
+    // MARK: - 更新
+
+    /// 将所有粒子与波纹推进 dt 秒，移除已消亡的对象
+    func update(dt: Float) {
+        // 更新粒子
+        for i in particles.indices {
+            particles[i].update(dt: dt)
+        }
+        particles.removeAll { !$0.isAlive }
+
+        // 更新波纹
+        for i in ripples.indices {
+            ripples[i].update(dt: dt)
+        }
+        ripples.removeAll { !$0.isAlive }
+
+        // 清理过期的连击按键记录
+        let now = Date().timeIntervalSince1970
+        recentPresses = recentPresses.filter { now - $0 < comboWindow }
+    }
+
+    /// 移除所有效果（空闲时使用）
+    func clear() {
+        particles.removeAll()
+        ripples.removeAll()
+        recentPresses.removeAll()
+    }
+}

@@ -1,0 +1,13 @@
+# macOS
+.DS_Store
+
+# 编译产物
+build/
+*.o
+*.dmg
+dmg-staging/
+
+# Xcode
+xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/

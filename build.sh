@@ -47,6 +47,7 @@ swiftc \
     -framework Cocoa \
     -framework AVFoundation \
     -framework CoreGraphics \
+    -framework ApplicationServices \
     -framework ServiceManagement \
     -O \
     "${SOURCES[@]}" \

@@ -39,6 +39,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 加载已保存的偏好设置
         particleSystem.mode = settings.effectMode
         audioEngine.mode = settings.soundMode
+        audioEngine.masterVolume = settings.soundVolume
+        audioEngine.pitchShift = settings.soundPitch
 
         // 监听设置窗口中的偏好变化
         observePreferenceChanges()
@@ -188,6 +190,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                            name: .barBarSoundChanged, object: nil)
         center.addObserver(self, selector: #selector(idlePreferenceChanged(_:)),
                            name: .barBarIdleChanged, object: nil)
+        center.addObserver(self, selector: #selector(volumePreferenceChanged(_:)),
+                           name: .barBarVolumeChanged, object: nil)
+        center.addObserver(self, selector: #selector(pitchPreferenceChanged(_:)),
+                           name: .barBarPitchChanged, object: nil)
     }
 
     // MARK: - 辅助功能权限变化监听
@@ -231,6 +237,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 设置窗口已保存延时，这里只需重新调度。
         if isPresented {
             scheduleIdleDismiss()
+        }
+    }
+
+    @objc private func volumePreferenceChanged(_ note: Notification) {
+        if let volume = note.object as? Float {
+            audioEngine.masterVolume = volume
+        }
+    }
+
+    @objc private func pitchPreferenceChanged(_ note: Notification) {
+        if let pitch = note.object as? Float {
+            audioEngine.pitchShift = pitch
         }
     }
 
@@ -487,6 +505,10 @@ extension AppDelegate: NSTouchBarDelegate {
 
         let item = NSCustomTouchBarItem(identifier: identifier)
         let view = BarBarView(frame: NSRect(x: 0, y: 0, width: 1085, height: 30), particleSystem: particleSystem)
+        // 点击 Touch Bar 时让出接管，恢复系统控制条
+        view.onTouch = { [weak self] in
+            self?.dismissTouchBar()
+        }
         self.touchBarView = view
         item.view = view
         return item

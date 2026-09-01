@@ -26,6 +26,10 @@ struct Particle {
     var tailLength: CGFloat = 0   // 发光拖尾向后延伸的长度
     var tailIsVertical = false    // true = 垂直光束，false = 水平拖尾
 
+    // 上下边界反射（用于"折射激光"模式）
+    var reflectsEdges = false     // 是否在 Touch Bar 上下边缘反弹
+    var boundHeight: CGFloat = 30 // 边界高度（Touch Bar 高度）
+
     /// 该粒子是否仍然存活
     var isAlive: Bool { life > 0 }
 
@@ -51,6 +55,17 @@ struct Particle {
             // 如果弹跳太弱则使其消亡
             if velocity.y < 20 {
                 life = 0
+            }
+        }
+
+        // 在上下边缘反射（折射激光）
+        if reflectsEdges {
+            if position.y < 0 {
+                position.y = 0
+                velocity.y = abs(velocity.y)
+            } else if position.y > boundHeight {
+                position.y = boundHeight
+                velocity.y = -abs(velocity.y)
             }
         }
 

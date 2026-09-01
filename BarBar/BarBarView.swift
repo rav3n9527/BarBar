@@ -1,10 +1,14 @@
 import Cocoa
+import QuartzCore
 
 /// 自定义 NSView，在 Touch Bar 上渲染粒子/涟漪效果。
 /// 使用 Timer 驱动的渲染循环，以 60fps 运行以保持动画流畅。
 class BarBarView: NSView {
     // MARK: - 依赖
     let particleSystem: ParticleSystem
+
+    /// 点击 Touch Bar 时回调（用于让出接管）
+    var onTouch: (() -> Void)?
 
     // MARK: - 渲染循环
     private var renderTimer: Timer?
@@ -16,6 +20,7 @@ class BarBarView: NSView {
 
     // MARK: - 背景渐变
     private var bgHue: CGFloat = 0.58 // 初始偏蓝
+    private let settings = Settings.shared
 
     init(frame frameRect: NSRect, particleSystem: ParticleSystem) {
         self.particleSystem = particleSystem
@@ -38,6 +43,15 @@ class BarBarView: NSView {
     /// 每次按键时调用，用于重置空闲计时器
     func notifyActivity() {
         lastActivityTime = CFAbsoluteTimeGetCurrent()
+    }
+
+    // MARK: - 触摸事件
+
+    /// 用户点击/触摸 Touch Bar 时触发 onTouch 回调，
+    /// 由 AppDelegate 负责让出 Touch Bar 接管。
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        onTouch?()
     }
 
     // MARK: - 渲染循环
@@ -89,8 +103,9 @@ class BarBarView: NSView {
         ctx.setFillColor(NSColor(calibratedHue: bgHue, saturation: 0.3, brightness: 0.08, alpha: 1).cgColor)
         ctx.fill(bounds)
 
-        // 环境中心光晕——bounce 模式跳过（该模式有自己的球）
-        if particleSystem.mode != .bounce {
+        // 环境中心光晕——bounce 模式跳过（该模式有自己的球），
+        // 且受"背景彩条"开关控制
+        if particleSystem.mode != .bounce && settings.showCenterGlow {
             drawCenterGlow(ctx: ctx, w: w, h: h)
         }
 
@@ -116,6 +131,8 @@ class BarBarView: NSView {
                 drawBeamParticle(ctx: ctx, particle: particle)
             case .fire:
                 drawParticle(ctx: ctx, particle: particle)
+            case .laserReflect:
+                drawLaserBeam(ctx: ctx, particle: particle)
             case .burst, .ripple:
                 drawParticle(ctx: ctx, particle: particle)
             }
@@ -133,11 +150,14 @@ class BarBarView: NSView {
         let intensity = min(1.0, CGFloat(particleSystem.combo) / 20.0)
         let glowRadius: CGFloat = 4 + intensity * 12
 
+        // 使用用户设置的彩条颜色（色相），默认偏蓝
+        let hue = CGFloat(settings.glowHue)
+
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         let locations: [CGFloat] = [0, 1]
         let colors = [
-            NSColor(calibratedHue: bgHue, saturation: 0.8, brightness: 0.3 + intensity * 0.4, alpha: 0.6 + intensity * 0.3).cgColor,
-            NSColor(calibratedHue: bgHue, saturation: 0.5, brightness: 0.1, alpha: 0).cgColor,
+            NSColor(calibratedHue: hue, saturation: 0.8, brightness: 0.3 + intensity * 0.4, alpha: 0.6 + intensity * 0.3).cgColor,
+            NSColor(calibratedHue: hue, saturation: 0.5, brightness: 0.1, alpha: 0).cgColor,
         ] as CFArray
 
         guard let gradient = CGGradient(colorsSpace: colorSpace, colors: colors, locations: locations) else { return }
@@ -328,6 +348,61 @@ class BarBarView: NSView {
                                    y: pos.y - particle.radius,
                                    width: particle.radius * 2,
                                    height: particle.radius * 2))
+
+        ctx.restoreGState()
+    }
+
+    // MARK: - 折射激光渲染
+    /// 星球大战风格的激光束：沿着速度方向画一条粗亮的射线，
+    /// 前后端有辉光，营造光束在 Touch Bar 内折射穿梭的动感。
+    private func drawLaserBeam(ctx: CGContext, particle: Particle) {
+        let pos = particle.position
+        let alpha = particle.alpha
+        guard alpha > 0.01 else { return }
+
+        // 光束方向 = 速度方向，拖尾沿反方向延伸
+        let vx = particle.velocity.x
+        let vy = particle.velocity.y
+        let speed = max(1, sqrt(vx * vx + vy * vy))
+        let tail = particle.tailLength
+
+        // 拖尾起点（粒子后方）
+        let tx = pos.x - (vx / speed) * tail
+        let ty = pos.y - (vy / speed) * tail
+
+        ctx.saveGState()
+        ctx.setLineCap(.round)
+
+        // 宽大的外层光晕
+        if let glowColor = particle.color.copy(alpha: alpha * 0.3) {
+            ctx.setStrokeColor(glowColor)
+            ctx.setLineWidth(particle.radius * 5)
+            ctx.move(to: CGPoint(x: tx, y: ty))
+            ctx.addLine(to: CGPoint(x: pos.x, y: pos.y))
+            ctx.strokePath()
+        }
+
+        // 主光束
+        if let beamColor = particle.color.copy(alpha: alpha) {
+            ctx.setStrokeColor(beamColor)
+            ctx.setLineWidth(particle.radius * 2)
+            ctx.move(to: CGPoint(x: tx, y: ty))
+            ctx.addLine(to: CGPoint(x: pos.x, y: pos.y))
+            ctx.strokePath()
+        }
+
+        // 高亮核心
+        ctx.setStrokeColor(NSColor.white.withAlphaComponent(alpha * 0.9).cgColor)
+        ctx.setLineWidth(particle.radius)
+        ctx.move(to: CGPoint(x: tx, y: ty))
+        ctx.addLine(to: CGPoint(x: pos.x, y: pos.y))
+        ctx.strokePath()
+
+        // 前端亮点
+        ctx.setFillColor(NSColor.white.withAlphaComponent(alpha).cgColor)
+        let headR = particle.radius * 1.6
+        ctx.fillEllipse(in: CGRect(x: pos.x - headR, y: pos.y - headR,
+                                   width: headR * 2, height: headR * 2))
 
         ctx.restoreGState()
     }

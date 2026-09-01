@@ -2,7 +2,7 @@ import Cocoa
 import ServiceManagement
 import Darwin
 
-/// 一个用代码构建的正式设置窗口，包含弹出菜单和复选框。
+/// 一个用代码构建的正式设置窗口，包含弹出菜单、滑条和复选框。
 class PreferencesWindowController: NSWindowController {
     private let settings = Settings.shared
 
@@ -11,10 +11,17 @@ class PreferencesWindowController: NSWindowController {
     private let soundPopup = NSPopUpButton()
     private let idlePopup = NSPopUpButton()
     private let launchCheckbox = NSButton(checkboxWithTitle: "登录时自动启动 BarBar", target: nil, action: nil)
+    private let volumeSlider = NSSlider()
+    private let volumeValueLabel = NSTextField(labelWithString: "70%")
+    private let pitchSlider = NSSlider()
+    private let pitchValueLabel = NSTextField(labelWithString: "1.0x")
+    private let glowCheckbox = NSButton(checkboxWithTitle: "显示背景彩条", target: nil, action: nil)
+    private let glowHueSlider = NSSlider()
+    private let glowHueLabel = NSTextField(labelWithString: "颜色")
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 380, height: 240),
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 365),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -30,7 +37,7 @@ class PreferencesWindowController: NSWindowController {
 
         // --- 视觉效果模式 ---
         let effectLabel = makeLabel("视觉效果")
-        effectPopup.frame = NSRect(x: 150, y: 195, width: 200, height: 26)
+        effectPopup.frame = NSRect(x: 150, y: 325, width: 200, height: 26)
         for mode in EffectMode.allCases {
             effectPopup.addItem(withTitle: mode.displayName)
         }
@@ -40,7 +47,7 @@ class PreferencesWindowController: NSWindowController {
 
         // --- 音效模式 ---
         let soundLabel = makeLabel("音效")
-        soundPopup.frame = NSRect(x: 150, y: 155, width: 200, height: 26)
+        soundPopup.frame = NSRect(x: 150, y: 285, width: 200, height: 26)
         for mode in SoundMode.allCases {
             soundPopup.addItem(withTitle: mode.displayName)
         }
@@ -48,16 +55,59 @@ class PreferencesWindowController: NSWindowController {
         soundPopup.target = self
         soundPopup.action = #selector(soundChanged)
 
+        // --- 音量 ---
+        let volumeLabel = makeLabel("音量")
+        volumeSlider.frame = NSRect(x: 150, y: 245, width: 160, height: 20)
+        volumeSlider.minValue = 0
+        volumeSlider.maxValue = 1
+        volumeSlider.isContinuous = true
+        volumeSlider.doubleValue = Double(settings.soundVolume)
+        volumeSlider.target = self
+        volumeSlider.action = #selector(volumeChanged)
+        volumeValueLabel.frame = NSRect(x: 315, y: 245, width: 45, height: 20)
+        volumeValueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        volumeValueLabel.alignment = .left
+
+        // --- 音调 ---
+        let pitchLabel = makeLabel("音调")
+        pitchSlider.frame = NSRect(x: 150, y: 205, width: 160, height: 20)
+        pitchSlider.minValue = 0.5
+        pitchSlider.maxValue = 2.0
+        pitchSlider.isContinuous = true
+        pitchSlider.doubleValue = Double(settings.soundPitch)
+        pitchSlider.target = self
+        pitchSlider.action = #selector(pitchChanged)
+        pitchValueLabel.frame = NSRect(x: 315, y: 205, width: 45, height: 20)
+        pitchValueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        pitchValueLabel.alignment = .left
+
+        // --- 背景彩条 ---
+        let glowLabel = makeLabel("背景彩条")
+        glowCheckbox.frame = NSRect(x: 150, y: 168, width: 140, height: 20)
+        glowCheckbox.state = settings.showCenterGlow ? .on : .off
+        glowCheckbox.target = self
+        glowCheckbox.action = #selector(glowToggled)
+        glowHueSlider.frame = NSRect(x: 150, y: 135, width: 160, height: 20)
+        glowHueSlider.minValue = 0
+        glowHueSlider.maxValue = 1
+        glowHueSlider.isContinuous = true
+        glowHueSlider.doubleValue = Double(settings.glowHue)
+        glowHueSlider.target = self
+        glowHueSlider.action = #selector(glowHueChanged)
+        glowHueLabel.frame = NSRect(x: 315, y: 135, width: 45, height: 20)
+        glowHueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        glowHueLabel.alignment = .left
+
         // --- 空闲让出延时 ---
         let idleLabel = makeLabel("空闲让出")
-        idlePopup.frame = NSRect(x: 150, y: 115, width: 200, height: 26)
-        idlePopup.addItems(withTitles: ["3 秒", "5 秒", "10 秒", "30 秒", "永不"])
+        idlePopup.frame = NSRect(x: 150, y: 100, width: 200, height: 26)
+        idlePopup.addItems(withTitles: ["1 秒", "3 秒", "5 秒", "10 秒", "永不"])
         let delay = settings.idleDismissDelay
         switch delay {
-        case 3.0: idlePopup.selectItem(at: 0)
-        case 5.0: idlePopup.selectItem(at: 1)
-        case 10.0: idlePopup.selectItem(at: 2)
-        case 30.0: idlePopup.selectItem(at: 3)
+        case 1.0: idlePopup.selectItem(at: 0)
+        case 3.0: idlePopup.selectItem(at: 1)
+        case 5.0: idlePopup.selectItem(at: 2)
+        case 10.0: idlePopup.selectItem(at: 3)
         default: idlePopup.selectItem(at: 4)
         }
         idlePopup.target = self
@@ -65,7 +115,7 @@ class PreferencesWindowController: NSWindowController {
 
         // --- 登录时启动 ---
         let launchLabel = makeLabel("开机启动")
-        launchCheckbox.frame = NSRect(x: 150, y: 70, width: 200, height: 20)
+        launchCheckbox.frame = NSRect(x: 150, y: 62, width: 200, height: 20)
         launchCheckbox.state = settings.launchAtLogin ? .on : .off
         launchCheckbox.target = self
         launchCheckbox.action = #selector(launchToggled)
@@ -73,11 +123,17 @@ class PreferencesWindowController: NSWindowController {
         // 布局标签
         positionLabel(effectLabel, above: effectPopup)
         positionLabel(soundLabel, above: soundPopup)
+        positionLabel(volumeLabel, above: volumeSlider)
+        positionLabel(pitchLabel, above: pitchSlider)
+        positionLabel(glowLabel, above: glowCheckbox)
         positionLabel(idleLabel, above: idlePopup)
         positionLabel(launchLabel, above: launchCheckbox)
 
         // 添加所有视图
         for view in [effectLabel, effectPopup, soundLabel, soundPopup,
+                     volumeLabel, volumeSlider, volumeValueLabel,
+                     pitchLabel, pitchSlider, pitchValueLabel,
+                     glowLabel, glowCheckbox, glowHueSlider, glowHueLabel,
                      idleLabel, idlePopup, launchLabel, launchCheckbox] {
             content.addSubview(view)
         }
@@ -118,8 +174,35 @@ class PreferencesWindowController: NSWindowController {
         NotificationCenter.default.post(name: .barBarSoundChanged, object: mode)
     }
 
+    @objc private func volumeChanged() {
+        let v = Float(volumeSlider.doubleValue)
+        settings.soundVolume = v
+        volumeValueLabel.stringValue = "\(Int(v * 100))%"
+        NotificationCenter.default.post(name: .barBarVolumeChanged, object: v)
+    }
+
+    @objc private func pitchChanged() {
+        let p = Float(pitchSlider.doubleValue)
+        settings.soundPitch = p
+        pitchValueLabel.stringValue = String(format: "%.1fx", p)
+        NotificationCenter.default.post(name: .barBarPitchChanged, object: p)
+    }
+
+    @objc private func glowToggled() {
+        let show = glowCheckbox.state == .on
+        settings.showCenterGlow = show
+        NotificationCenter.default.post(name: .barBarGlowToggleChanged, object: show)
+    }
+
+    @objc private func glowHueChanged() {
+        let hue = Float(glowHueSlider.doubleValue)
+        settings.glowHue = hue
+        glowHueLabel.stringValue = "颜色"
+        NotificationCenter.default.post(name: .barBarGlowHueChanged, object: hue)
+    }
+
     @objc private func idleChanged() {
-        let delays: [TimeInterval] = [3, 5, 10, 30, -1]  // -1 = 永不
+        let delays: [TimeInterval] = [1, 3, 5, 10, -1]  // -1 = 永不
         let idx = idlePopup.indexOfSelectedItem
         guard idx < delays.count else { return }
         settings.idleDismissDelay = delays[idx]
@@ -208,11 +291,11 @@ class PreferencesWindowController: NSWindowController {
             return false
         }
 
-        // 使用 launchctl 加载（用户域，无需管理员权限）
+        // 用 launchctl 加载（用户域，无需管理员权限）
         let uid = getuid()
         let ok = runProcess("/bin/launchctl", ["bootstrap", "gui/\(uid)", launchAgentPath])
         if !ok {
-            // 若已加载，bootstrap 可能失败——改用 kickstart 以确保成功
+            // bootstrap 在已加载时可能失败——尝试 kickstart 以确保生效
             _ = runProcess("/bin/launchctl", ["kickstart", "gui/\(uid)/com.raven.barbar"])
         }
         return true
@@ -259,6 +342,12 @@ class PreferencesWindowController: NSWindowController {
     func syncFromSettings() {
         effectPopup.selectItem(at: settings.effectMode.rawValue)
         soundPopup.selectItem(at: settings.soundMode.rawValue)
+        volumeSlider.doubleValue = Double(settings.soundVolume)
+        volumeValueLabel.stringValue = "\(Int(settings.soundVolume * 100))%"
+        pitchSlider.doubleValue = Double(settings.soundPitch)
+        pitchValueLabel.stringValue = String(format: "%.1fx", settings.soundPitch)
+        glowCheckbox.state = settings.showCenterGlow ? .on : .off
+        glowHueSlider.doubleValue = Double(settings.glowHue)
         launchCheckbox.state = settings.launchAtLogin ? .on : .off
     }
 }
@@ -269,4 +358,8 @@ extension Notification.Name {
     static let barBarEffectChanged = Notification.Name("barBarEffectChanged")
     static let barBarSoundChanged = Notification.Name("barBarSoundChanged")
     static let barBarIdleChanged = Notification.Name("barBarIdleChanged")
+    static let barBarVolumeChanged = Notification.Name("barBarVolumeChanged")
+    static let barBarPitchChanged = Notification.Name("barBarPitchChanged")
+    static let barBarGlowToggleChanged = Notification.Name("barBarGlowToggleChanged")
+    static let barBarGlowHueChanged = Notification.Name("barBarGlowHueChanged")
 }

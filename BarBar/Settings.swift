@@ -10,6 +10,10 @@ final class Settings {
         static let soundMode = "soundMode"
         static let idleDismissDelay = "idleDismissDelay"
         static let launchAtLogin = "launchAtLogin"
+        static let soundVolume = "soundVolume"
+        static let soundPitch = "soundPitch"
+        static let showCenterGlow = "showCenterGlow"
+        static let glowHue = "glowHue"
     }
 
     private init() {}
@@ -37,11 +41,10 @@ final class Settings {
     }
 
     /// 空闲多少秒后将 Touch Bar 交还给系统。
-    /// 以十分之一秒存储，便于使用整数。
     var idleDismissDelay: TimeInterval {
         get {
             let stored = defaults.double(forKey: Keys.idleDismissDelay)
-            return stored > 0 ? stored : 3.0
+            return stored > 0 ? stored : 1.0
         }
         set {
             defaults.set(newValue, forKey: Keys.idleDismissDelay)
@@ -55,6 +58,51 @@ final class Settings {
         }
         set {
             defaults.set(newValue, forKey: Keys.launchAtLogin)
+        }
+    }
+
+    /// 音效总音量（0.0 ~ 1.0，默认 0.7）
+    var soundVolume: Float {
+        get {
+            let stored = defaults.float(forKey: Keys.soundVolume)
+            return stored > 0 ? stored : 0.7
+        }
+        set {
+            defaults.set(min(max(newValue, 0), 1), forKey: Keys.soundVolume)
+        }
+    }
+
+    /// 音调倍率（0.5 ~ 2.0，默认 1.0，1.0 = 标准音高）
+    var soundPitch: Float {
+        get {
+            let stored = defaults.float(forKey: Keys.soundPitch)
+            return stored > 0 ? stored : 1.0
+        }
+        set {
+            defaults.set(min(max(newValue, 0.5), 2.0), forKey: Keys.soundPitch)
+        }
+    }
+
+    /// 是否显示背景光晕彩条
+    var showCenterGlow: Bool {
+        get {
+            // 默认开启；未设置过时为 true
+            if defaults.object(forKey: Keys.showCenterGlow) == nil { return true }
+            return defaults.bool(forKey: Keys.showCenterGlow)
+        }
+        set {
+            defaults.set(newValue, forKey: Keys.showCenterGlow)
+        }
+    }
+
+    /// 背景光晕的色相（0.0 ~ 1.0，默认 0.58 偏蓝）
+    var glowHue: Float {
+        get {
+            let stored = defaults.float(forKey: Keys.glowHue)
+            return stored >= 0 ? stored : 0.58
+        }
+        set {
+            defaults.set(min(max(newValue, 0), 1), forKey: Keys.glowHue)
         }
     }
 }

@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import Cocoa
 
 /// 可从菜单切换的视觉效果模式。
 enum EffectMode: Int, CaseIterable {
@@ -12,18 +13,20 @@ enum EffectMode: Int, CaseIterable {
     case meteor = 6
     case spectrum = 7
     case fire = 8
+    case laserReflect = 10
 
     var displayName: String {
         switch self {
-        case .burst:     return "粒子爆炸"
-        case .ripple:    return "水波纹"
-        case .rain:      return "光雨"
-        case .bounce:    return "弹跳球"
-        case .shockwave: return "冲击波"
-        case .laser:     return "激光脉冲"
-        case .meteor:    return "流星"
-        case .spectrum:  return "频谱"
-        case .fire:      return "火焰"
+        case .burst:        return "粒子爆炸"
+        case .ripple:       return "水波纹"
+        case .rain:         return "光雨"
+        case .bounce:       return "弹跳球"
+        case .shockwave:    return "冲击波"
+        case .laser:        return "激光脉冲"
+        case .meteor:       return "流星"
+        case .spectrum:     return "频谱"
+        case .fire:         return "火焰"
+        case .laserReflect: return "折射激光"
         }
     }
 }
@@ -100,15 +103,16 @@ class ParticleSystem {
         recentPresses = recentPresses.filter { now - $0 < comboWindow }
 
         switch mode {
-        case .burst:     spawnBurst(at: x, barHeight: barHeight)
-        case .ripple:    spawnRipple(at: x, barHeight: barHeight)
-        case .rain:      spawnRain(at: x, barHeight: barHeight)
-        case .bounce:    spawnBounce(at: x, barHeight: barHeight)
-        case .shockwave: spawnShockwave(at: x, barHeight: barHeight)
-        case .laser:     spawnLaser(at: x, barHeight: barHeight)
-        case .meteor:    spawnMeteor(at: x, barHeight: barHeight)
-        case .spectrum:  spawnSpectrum(at: x, barHeight: barHeight)
-        case .fire:      spawnFire(at: x, barHeight: barHeight)
+        case .burst:        spawnBurst(at: x, barHeight: barHeight)
+        case .ripple:       spawnRipple(at: x, barHeight: barHeight)
+        case .rain:         spawnRain(at: x, barHeight: barHeight)
+        case .bounce:       spawnBounce(at: x, barHeight: barHeight)
+        case .shockwave:    spawnShockwave(at: x, barHeight: barHeight)
+        case .laser:        spawnLaser(at: x, barHeight: barHeight)
+        case .meteor:       spawnMeteor(at: x, barHeight: barHeight)
+        case .spectrum:     spawnSpectrum(at: x, barHeight: barHeight)
+        case .fire:         spawnFire(at: x, barHeight: barHeight)
+        case .laserReflect: spawnLaserReflect(at: x, barHeight: barHeight)
         }
     }
 
@@ -475,6 +479,72 @@ class ParticleSystem {
             p.growRate = 0.6
             particles.append(p)
         }
+    }
+
+    // MARK: - 折射激光
+
+    /// 星球大战风格的折射激光：激光束以斜角射入，在 Touch Bar 的
+    /// 上下边缘不断反射弹跳，形成来回穿梭的光束。
+    private func spawnLaserReflect(at x: CGFloat, barHeight: CGFloat) {
+        let now = Date().timeIntervalSince1970
+
+        // 星球大战经典激光颜色：红 / 绿 / 蓝
+        let colors: [CGColor] = [
+            CGColor(red: 1.0, green: 0.15, blue: 0.1, alpha: 1),   // 红色
+            CGColor(red: 0.1, green: 1.0, blue: 0.2, alpha: 1),    // 绿色
+            CGColor(red: 0.15, green: 0.4, blue: 1.0, alpha: 1),   // 蓝色
+        ]
+        let color = colors.randomElement() ?? colors[0]
+
+        // 限制折射激光总条数（最多 12 条），防止过多导致卡顿
+        let activeLasers = particles.filter { $0.reflectsEdges }.count
+        let remaining = 12 - activeLasers
+        guard remaining > 0 else { return }
+
+        // 每次按键发射 1~2 束激光（连击越高越多），但不超出上限
+        let desired = combo >= 8 ? 2 : 1
+        let beamCount = min(desired, remaining)
+        for _ in 0 ..< beamCount {
+            // 从按键位置的垂直范围内射出，斜角方向（向上或向下）
+            let startY = CGFloat.random(in: barHeight * 0.2 ... barHeight * 0.8)
+            // 斜角：与水平方向的夹角在 20°~60° 之间
+            let angle = CGFloat.random(in: 0.35 ... 1.05) * (Bool.random() ? 1 : -1)
+            let speed = CGFloat.random(in: 280 ... 420)
+
+            var p = Particle(
+                position: CGPoint(x: x, y: startY),
+                velocity: CGPoint(x: cos(angle) * speed,
+                                  y: sin(angle) * speed),
+                color: color,
+                alpha: 1.0,
+                radius: CGFloat.random(in: 1.2 ... 1.8),
+                life: Float.random(in: 0.8 ... 1.4),
+                maxLife: Float.random(in: 0.8 ... 1.4),
+                born: now
+            )
+            p.gravity = 0
+            p.drag = 0
+            p.growRate = 0
+            p.reflectsEdges = true
+            p.boundHeight = barHeight
+            p.tailLength = 70   // 长长的激光拖尾
+            particles.append(p)
+        }
+
+        // 发射口的闪光
+        var muzzle = Particle(
+            position: CGPoint(x: x, y: CGFloat.random(in: 0 ... barHeight)),
+            velocity: .zero,
+            color: color,
+            alpha: 1.0,
+            radius: 3.5,
+            life: 0.15,
+            maxLife: 0.15,
+            born: now
+        )
+        muzzle.gravity = 0
+        muzzle.growRate = 5
+        particles.append(muzzle)
     }
 
     // MARK: - 更新

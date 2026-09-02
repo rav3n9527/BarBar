@@ -49,6 +49,10 @@ class ParticleSystem {
         var radiusRange: ClosedRange<CGFloat> = 2 ... 5
         /// 波纹最大半径
         var maxRippleRadius: CGFloat = 60
+        /// 全局粒子数上限（Touch Bar 性能有限）
+        var maxParticles: Int = 80
+        /// 全局波纹数上限
+        var maxRipples: Int = 10
     }
 
     var config = Config()
@@ -113,6 +117,14 @@ class ParticleSystem {
         case .spectrum:     spawnSpectrum(at: x, barHeight: barHeight)
         case .fire:         spawnFire(at: x, barHeight: barHeight)
         case .laserReflect: spawnLaserReflect(at: x, barHeight: barHeight)
+        }
+
+        // 裁剪溢出：Touch Bar 性能有限，超过上限时丢弃最旧的
+        if particles.count > config.maxParticles {
+            particles.removeFirst(particles.count - config.maxParticles)
+        }
+        if ripples.count > config.maxRipples {
+            ripples.removeFirst(ripples.count - config.maxRipples)
         }
     }
 

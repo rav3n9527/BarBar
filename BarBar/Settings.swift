@@ -12,7 +12,7 @@ final class Settings {
         static let launchAtLogin = "launchAtLogin"
         static let soundVolume = "soundVolume"
         static let soundPitch = "soundPitch"
-        static let showCenterGlow = "showCenterGlow"
+        static let backgroundMode = "backgroundMode"
         static let glowHue = "glowHue"
     }
 
@@ -83,19 +83,27 @@ final class Settings {
         }
     }
 
-    /// 是否显示背景光晕彩条
-    var showCenterGlow: Bool {
+    /// 当前背景光效模式（默认中心彩条）
+    var backgroundMode: BackgroundMode {
         get {
-            // 默认开启；未设置过时为 true
-            if defaults.object(forKey: Keys.showCenterGlow) == nil { return true }
-            return defaults.bool(forKey: Keys.showCenterGlow)
+            // 迁移旧版本开关：showCenterGlow = false → 无；true → 中心彩条
+            if defaults.object(forKey: Keys.backgroundMode) == nil {
+                let legacyOff = defaults.object(forKey: "showCenterGlow") != nil
+                    && !defaults.bool(forKey: "showCenterGlow")
+                let migrated: BackgroundMode = legacyOff ? .none : .centerGlow
+                defaults.set(migrated.rawValue, forKey: Keys.backgroundMode)
+                defaults.removeObject(forKey: "showCenterGlow")
+                return migrated
+            }
+            let raw = defaults.integer(forKey: Keys.backgroundMode)
+            return BackgroundMode(rawValue: raw) ?? .centerGlow
         }
         set {
-            defaults.set(newValue, forKey: Keys.showCenterGlow)
+            defaults.set(newValue.rawValue, forKey: Keys.backgroundMode)
         }
     }
 
-    /// 背景光晕的色相（0.0 ~ 1.0，默认 0.58 偏蓝）
+    /// 背景光效的色相（0.0 ~ 1.0，默认 0.58 偏蓝）
     var glowHue: Float {
         get {
             let stored = defaults.float(forKey: Keys.glowHue)

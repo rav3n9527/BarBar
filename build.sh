@@ -31,9 +31,11 @@ SOURCES=(
     "${SRC_DIR}/KeyboardMonitor.swift"
     "${SRC_DIR}/KeyPosition.swift"
     "${SRC_DIR}/Settings.swift"
+    "${SRC_DIR}/BackgroundMode.swift"
+    "${SRC_DIR}/ShooterScene.swift"
     "${SRC_DIR}/BarBarView.swift"
     "${SRC_DIR}/TouchBarHack.swift"
-    "${SRC_DIR}/PreferencesWindowController.swift"
+    "${SRC_DIR}/StatusPanelViewController.swift"
     "${SRC_DIR}/AboutWindowController.swift"
     "${SRC_DIR}/AppDelegate.swift"
 )

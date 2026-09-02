@@ -14,8 +14,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var touchBarView: BarBarView?
     private var aboutController: AboutWindowController?
-    private var preferencesController: PreferencesWindowController?
-    private var toggleMenuItem: NSMenuItem?
+    private var statusPopover: NSPopover?
+    private var statusPanelController: StatusPanelViewController?
 
     // MARK: - 触摸栏
     private var touchBar: NSTouchBar?
@@ -86,63 +86,50 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 button.title = "🎵"
             }
-            button.toolTip = "BarBar — 点击切换开关"
+            button.toolTip = "BarBar — 点击打开面板"
+            // 点击图标弹出快速面板（而非长菜单）
+            button.target = self
+            button.action = #selector(statusItemClicked)
         }
 
-        let menu = NSMenu()
-        menu.autoenablesItems = false
+        // 构建完整设置面板（效果/音效/音量等全部整合在此，
+        // 不再有独立的偏好设置窗口）
+        let panel = StatusPanelViewController()
+        panel.onToggleMonitoring = { [weak self] in
+            self?.toggleMonitoring()
+        }
+        panel.onOpenAbout = { [weak self] in
+            self?.showAbout()
+        }
+        panel.onQuit = {
+            NSApp.terminate(nil)
+        }
+        self.statusPanelController = panel
+    }
 
-        // 标准应用菜单项
-        let aboutItem = NSMenuItem(title: "关于 BarBar", action: #selector(showAbout), keyEquivalent: "")
-        aboutItem.target = self
-        menu.addItem(aboutItem)
-
-        let prefsItem = NSMenuItem(title: "偏好设置…", action: #selector(showPreferences), keyEquivalent: ",")
-        prefsItem.target = self
-        menu.addItem(prefsItem)
-
-        let helpItem = NSMenuItem(title: "帮助", action: #selector(showHelp), keyEquivalent: "?")
-        helpItem.target = self
-        menu.addItem(helpItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        let toggleItem = NSMenuItem(title: isMonitoring ? "停止监听" : "启动监听",
-                                    action: #selector(toggleMonitoring), keyEquivalent: "")
-        toggleItem.target = self
-        toggleMenuItem = toggleItem
-        menu.addItem(toggleItem)
-        menu.addItem(NSMenuItem.separator())
-
-        // 扁平菜单（无子菜单）——LSUIElement 菜单栏应用中的 AppKit 子菜单
-        // 存在一个 bug：首次悬停在子菜单项上会关闭整个菜单。
-        // 因此我们使用禁用的“分区标题”项，后接各选项。
-        let effectHeader = NSMenuItem(title: "视觉效果", action: nil, keyEquivalent: "")
-        effectHeader.isEnabled = false
-        menu.addItem(effectHeader)
-        for mode in EffectMode.allCases {
-            let item = NSMenuItem(title: mode.displayName, action: #selector(selectEffectMode(_:)), keyEquivalent: "")
-            item.target = self
-            item.tag = mode.rawValue
-            item.state = (mode == settings.effectMode) ? .on : .off
-            menu.addItem(item)
+    /// 点击状态栏图标：弹出/收起快速面板。
+    @objc private func statusItemClicked() {
+        guard let button = statusItem?.button else { return }
+        if let popover = statusPopover, popover.isShown {
+            popover.performClose(nil)
+            return
         }
 
-        menu.addItem(NSMenuItem.separator())
-        let soundHeader = NSMenuItem(title: "音效", action: nil, keyEquivalent: "")
-        soundHeader.isEnabled = false
-        menu.addItem(soundHeader)
-        for mode in SoundMode.allCases {
-            let item = NSMenuItem(title: mode.displayName, action: #selector(selectSoundMode(_:)), keyEquivalent: "")
-            item.target = self
-            item.tag = mode.rawValue
-            item.state = (mode == settings.soundMode) ? .on : .off
-            menu.addItem(item)
-        }
+        // 确保应用活跃，否则 popover 可能无法正确获得焦点
+        activateApp()
 
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "退出", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
-        statusItem?.menu = menu
+        // 每次打开时同步当前状态
+        statusPanelController?.setMonitoring(isMonitoring)
+        statusPanelController?.syncFromSettings()
+
+        if statusPopover == nil {
+            let popover = NSPopover()
+            popover.behavior = .transient   // 点击外部自动关闭
+            popover.animates = true
+            popover.contentViewController = statusPanelController
+            statusPopover = popover
+        }
+        statusPopover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
 
     // MARK: - 标准菜单操作
@@ -153,31 +140,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         aboutController?.showWindow(nil)
         activateApp()
-    }
-
-    @objc private func showPreferences() {
-        if preferencesController == nil {
-            preferencesController = PreferencesWindowController()
-        }
-        preferencesController?.showWindow(nil)
-        activateApp()
-    }
-
-    @objc private func showHelp() {
-        let alert = NSAlert()
-        alert.messageText = "BarBar 帮助"
-        alert.informativeText = """
-        BarBar 通过监听键盘输入，在 Touch Bar 上触发粒子动效和音效。
-
-        • 视觉效果：9 种可切换的粒子/波纹/光束动效
-        • 音效：7 种合成音色，随按键触发
-        • 空闲让出：停止打字一段时间后自动让出 Touch Bar
-
-        需要「辅助功能」权限才能监听全局键盘。
-        """
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "好的")
-        alert.runModal()
     }
 
     // MARK: - 偏好变化处理
@@ -194,6 +156,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                            name: .barBarVolumeChanged, object: nil)
         center.addObserver(self, selector: #selector(pitchPreferenceChanged(_:)),
                            name: .barBarPitchChanged, object: nil)
+        center.addObserver(self, selector: #selector(glowModePreferenceChanged(_:)),
+                           name: .barBarGlowModeChanged, object: nil)
+        center.addObserver(self, selector: #selector(glowHuePreferenceChanged(_:)),
+                           name: .barBarGlowHueChanged, object: nil)
     }
 
     // MARK: - 辅助功能权限变化监听
@@ -222,14 +188,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func effectPreferenceChanged(_ note: Notification) {
         if let mode = note.object as? EffectMode {
             particleSystem.mode = mode
-            updateMenuStates()
+            updatePanelState()
         }
     }
 
     @objc private func soundPreferenceChanged(_ note: Notification) {
         if let mode = note.object as? SoundMode {
             audioEngine.mode = mode
-            updateMenuStates()
+            updatePanelState()
         }
     }
 
@@ -249,6 +215,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func pitchPreferenceChanged(_ note: Notification) {
         if let pitch = note.object as? Float {
             audioEngine.pitchShift = pitch
+        }
+    }
+
+    @objc private func glowModePreferenceChanged(_ note: Notification) {
+        if let mode = note.object as? BackgroundMode {
+            settings.backgroundMode = mode
+            updatePanelState()
+        }
+    }
+
+    @objc private func glowHuePreferenceChanged(_ note: Notification) {
+        if let hue = note.object as? Float {
+            settings.glowHue = hue
+            updatePanelState()
         }
     }
 
@@ -295,39 +275,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             startMonitoring()
         }
-        updateMonitoringMenuTitle()
+        updatePanelState()
     }
 
-    /// 根据当前监听状态更新菜单按钮的标题
-    private func updateMonitoringMenuTitle() {
-        toggleMenuItem?.title = isMonitoring ? "停止监听" : "启动监听"
-    }
-
-    @objc private func selectEffectMode(_ sender: NSMenuItem) {
-        guard let mode = EffectMode(rawValue: sender.tag) else { return }
-        settings.effectMode = mode
-        particleSystem.mode = mode
-        updateMenuStates()
-    }
-
-    @objc private func selectSoundMode(_ sender: NSMenuItem) {
-        guard let mode = SoundMode(rawValue: sender.tag) else { return }
-        settings.soundMode = mode
-        audioEngine.mode = mode
-        updateMenuStates()
-    }
-
-    /// 刷新所有模式项上的勾选标记
-    private func updateMenuStates() {
-        guard let menu = statusItem?.menu else { return }
-
-        for item in menu.items {
-            if item.action == #selector(selectEffectMode(_:)) {
-                item.state = (item.tag == settings.effectMode.rawValue) ? .on : .off
-            } else if item.action == #selector(selectSoundMode(_:)) {
-                item.state = (item.tag == settings.soundMode.rawValue) ? .on : .off
-            }
-        }
+    /// 同步快速面板的显示状态（监听开关文字、下拉选中项）
+    private func updatePanelState() {
+        statusPanelController?.setMonitoring(isMonitoring)
+        statusPanelController?.syncFromSettings()
     }
 
     // MARK: - 监听
@@ -347,19 +301,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let success = keyboardMonitor.start()
         isMonitoring = success
         if !success {
-            updateMonitoringMenuTitle()
+            updatePanelState()
             return
         }
         keyboardMonitor.onKeyPress = { [weak self] keyCode, character in
             self?.handleKeyPress(keyCode: keyCode, character: character)
         }
-        updateMonitoringMenuTitle()
+        updatePanelState()
     }
 
     private func stopMonitoring() {
         keyboardMonitor.stop()
         isMonitoring = false
-        updateMonitoringMenuTitle()
+        updatePanelState()
     }
 
     // MARK: - 辅助功能授权
@@ -372,7 +326,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         AXIsProcessTrustedWithOptions(options)
 
-        updateMonitoringMenuTitle()
+        updatePanelState()
         startAccessibilityPolling()
     }
 
@@ -468,6 +422,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard isPresented, let bar = touchBar else { return }
         TouchBarHack.dismiss(bar)
         isPresented = false
+        // 让出后停掉视图渲染循环，避免残留计时器在后台继续驱动
+        // 粒子系统（否则反复让出/接管会累积计时器导致卡死）
+        touchBarView?.deactivate()
     }
 
     /// 重置空闲计时器：在设定的空闲延时（来自设置）后
@@ -502,6 +459,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 extension AppDelegate: NSTouchBarDelegate {
     func touchBar(_ touchBar: NSTouchBar, makeItemForIdentifier identifier: NSTouchBarItem.Identifier) -> NSTouchBarItem? {
         guard identifier == touchBarItemIdentifier else { return nil }
+
+        // 关键：停掉旧视图的渲染循环。每次重新接管都会创建新视图，
+        // 若旧视图的 60fps 计时器残留，会持续占用主线程并重复驱动
+        // 同一个粒子系统——多轮让出/接管后累积卡死且无法恢复。
+        touchBarView?.deactivate()
 
         let item = NSCustomTouchBarItem(identifier: identifier)
         let view = BarBarView(frame: NSRect(x: 0, y: 0, width: 1085, height: 30), particleSystem: particleSystem)

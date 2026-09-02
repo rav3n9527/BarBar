@@ -13,7 +13,9 @@ enum EffectMode: Int, CaseIterable {
     case meteor = 6
     case spectrum = 7
     case fire = 8
-    case laserReflect = 10
+    case laserReflect = 9
+    case ecg = 10
+    case shooter = 11
 
     var displayName: String {
         switch self {
@@ -27,6 +29,8 @@ enum EffectMode: Int, CaseIterable {
         case .spectrum:     return "频谱"
         case .fire:         return "火焰"
         case .laserReflect: return "折射激光"
+        case .ecg:          return "心电图"
+        case .shooter:      return "CRT 空战"
         }
     }
 }
@@ -59,12 +63,45 @@ class ParticleSystem {
 
     /// 当前视觉效果模式
     var mode: EffectMode = .burst {
-        didSet { clear() }  // 切换模式时清除旧效果
+        didSet {
+            clear()   // 切换模式时清除旧效果
+            // ECG 采样数组只在 ECG 模式使用；进出 ECG 模式时清掉，
+            // 避免残留旧波形（ECG→ECG 重复赋值时保留现有波形）
+            if oldValue != .ecg || mode != .ecg {
+                ecgSamples.removeAll()
+            }
+            // 进入 CRT 空战模式时重置游戏
+            if mode == .shooter && oldValue != .shooter {
+                shooterScene.reset()
+            }
+        }
     }
 
     // MARK: - 状态
     private(set) var particles: [Particle] = []
     private(set) var ripples: [Ripple] = []
+
+    /// 最近一次生成效果的时间戳（CFAbsoluteTime）。
+    /// 供各视图共享的空闲清理判断——避免每个视图各自维护独立的
+    /// 空闲时间戳，导致让出/重新接管后新视图（时间戳为 0）误清粒子。
+    private(set) var lastSpawnTime: CFAbsoluteTime = 0
+
+    // MARK: 心电图（ECG）数据
+    /// 心电图采样线：按 Touch Bar 宽度固定的若干采样点，值域约 -1...1。
+    /// 采样数组整体向左滚动，模拟心电监护仪。
+    private(set) var ecgSamples: [CGFloat] = []
+    /// ECG 采样点数量（按 Touch Bar 宽度）
+    private let ecgSampleCount = 220
+    /// 当前 ECG "心跳"相位进度（0...1），每次按键从 0 重启
+    private var ecgPhase: Double = 0
+    /// 正在流经屏幕的心跳脉冲（QRS 尖峰）——由最近按键激发
+    private var ecgBeatIntensity: CGFloat = 0
+    /// 上次按键是否产生了 ECG 脉冲的时间
+    private var ecgBeatActive = false
+
+    // MARK: CRT 空战场景
+    /// 飞机射击小游戏场景（CRT 空战模式）
+    let shooterScene = ShooterScene()
 
     /// 用于连击追踪的近期按键时间戳
     private var recentPresses: [TimeInterval] = []
@@ -106,6 +143,9 @@ class ParticleSystem {
         recentPresses.append(now)
         recentPresses = recentPresses.filter { now - $0 < comboWindow }
 
+        // 记录本次生成时间（供视图的空闲清理判断）
+        lastSpawnTime = CFAbsoluteTimeGetCurrent()
+
         switch mode {
         case .burst:        spawnBurst(at: x, barHeight: barHeight)
         case .ripple:       spawnRipple(at: x, barHeight: barHeight)
@@ -117,6 +157,8 @@ class ParticleSystem {
         case .spectrum:     spawnSpectrum(at: x, barHeight: barHeight)
         case .fire:         spawnFire(at: x, barHeight: barHeight)
         case .laserReflect: spawnLaserReflect(at: x, barHeight: barHeight)
+        case .ecg:          spawnECG(at: x, barHeight: barHeight)
+        case .shooter:      shooterScene.keyPress(at: x)
         }
 
         // 裁剪溢出：Touch Bar 性能有限，超过上限时丢弃最旧的
@@ -500,13 +542,8 @@ class ParticleSystem {
     private func spawnLaserReflect(at x: CGFloat, barHeight: CGFloat) {
         let now = Date().timeIntervalSince1970
 
-        // 星球大战经典激光颜色：红 / 绿 / 蓝
-        let colors: [CGColor] = [
-            CGColor(red: 1.0, green: 0.15, blue: 0.1, alpha: 1),   // 红色
-            CGColor(red: 0.1, green: 1.0, blue: 0.2, alpha: 1),    // 绿色
-            CGColor(red: 0.15, green: 0.4, blue: 1.0, alpha: 1),   // 蓝色
-        ]
-        let color = colors.randomElement() ?? colors[0]
+        // 荧光绿激光（单色）
+        let color = CGColor(red: 0.2, green: 1.0, blue: 0.35, alpha: 1)
 
         // 限制折射激光总条数（最多 12 条），防止过多导致卡顿
         let activeLasers = particles.filter { $0.reflectsEdges }.count
@@ -559,6 +596,81 @@ class ParticleSystem {
         particles.append(muzzle)
     }
 
+    // MARK: - 心电图（ECG）
+
+    /// 初始化心电图采样数组（切换/进入 ECG 模式时调用）
+    private func ensureECGInitialized() {
+        guard ecgSamples.isEmpty else { return }
+        ecgSamples = Array(repeating: 0, count: ecgSampleCount)
+        ecgPhase = 0
+        ecgBeatIntensity = 0
+        ecgBeatActive = false
+    }
+
+    /// ECG 模式：每次按键激发一次"心跳"，让完整 QRS 波形流经屏幕。
+    private func spawnECG(at x: CGFloat, barHeight: CGFloat) {
+        ensureECGInitialized()
+        // 按键越快（combo 越高）心跳越强
+        ecgBeatIntensity = min(1.0, 0.5 + CGFloat(combo) * 0.06)
+        ecgBeatActive = true
+    }
+
+    /// ECG 采样线向右滚动：右端追加新采样，整体左移，模拟监护仪扫描。
+    private func updateECG(dt: Float) {
+        guard !ecgSamples.isEmpty else { return }
+
+        // 相位持续推进（右端新采样对应"当前时刻"）
+        ecgPhase += Double(dt) * 0.9
+
+        // 若强度已衰减至静息，则放慢相位、清除活跃标记
+        if ecgBeatIntensity <= 0.01 {
+            ecgBeatActive = false
+        }
+        // 心搏结束后（相位过一圈）强度自然回落，回归平静基线
+        if ecgBeatActive && ecgPhase >= 1.0 {
+            ecgBeatActive = false
+            ecgPhase = 0
+            ecgBeatIntensity = 0
+        }
+
+        // 新采样 = 平静基线 + （活跃时）完整心搏波形
+        let p = CGFloat(ecgPhase.truncatingRemainder(dividingBy: 1.0))
+        var newValue = baseWaveform()
+        if ecgBeatActive && ecgBeatIntensity > 0.01 {
+            newValue += ecgBeatWaveform(p) * ecgBeatIntensity
+        }
+        // 心搏结束后的一小段让强度平滑衰减
+        ecgBeatIntensity *= CGFloat(1.0 - 0.5 * dt)
+        if ecgBeatIntensity < 0.02 { ecgBeatIntensity = 0 }
+
+        // 将新值压入右端，移除左端 → 整条线向左滚动
+        ecgSamples.removeFirst()
+        ecgSamples.append(newValue)
+    }
+
+    /// 一个完整心搏周期的波形（相位 p ∈ 0...1）：P 波 → QRS → T 波
+    private func ecgBeatWaveform(_ p: CGFloat) -> CGFloat {
+        let pWave = gaussian(p, center: 0.08, width: 0.045) * 0.25
+        // QRS：Q 小下冲 → R 高大尖峰 → S 下冲
+        let qWave = -gaussian(p, center: 0.22, width: 0.018) * 0.5
+        let rWave = gaussian(p, center: 0.25, width: 0.028) * 1.6
+        let sWave = -gaussian(p, center: 0.30, width: 0.02) * 0.45
+        let tWave = gaussian(p, center: 0.55, width: 0.07) * 0.55
+        return pWave + qWave + rWave + sWave + tWave
+    }
+
+    /// 平静基线：小幅上下呼吸，让心电图看起来"活着"
+    private func baseWaveform() -> CGFloat {
+        let t = CFAbsoluteTimeGetCurrent()
+        return CGFloat(sin(t * 1.8) * 0.05 + sin(t * 3.1) * 0.03)
+    }
+
+    /// 归一化高斯，用于生成 P/QRS/T 波形状
+    private func gaussian(_ x: CGFloat, center: CGFloat, width: CGFloat) -> CGFloat {
+        let d = (x - center) / width
+        return exp(-d * d)
+    }
+
     // MARK: - 更新
 
     /// 将所有粒子与波纹推进 dt 秒，移除已消亡的对象
@@ -578,6 +690,19 @@ class ParticleSystem {
         // 清理过期的连击按键记录
         let now = Date().timeIntervalSince1970
         recentPresses = recentPresses.filter { now - $0 < comboWindow }
+
+        // 心电图模式：推进滚动采样线
+        if mode == .ecg {
+            if ecgSamples.isEmpty {
+                ensureECGInitialized()
+            }
+            updateECG(dt: dt)
+        }
+
+        // CRT 空战模式：推进游戏场景
+        if mode == .shooter {
+            shooterScene.update(dt: dt)
+        }
     }
 
     /// 移除所有效果（空闲时使用）
@@ -585,5 +710,6 @@ class ParticleSystem {
         particles.removeAll()
         ripples.removeAll()
         recentPresses.removeAll()
+        lastSpawnTime = CFAbsoluteTimeGetCurrent()  // 重置，避免刚清空又被判空闲
     }
 }

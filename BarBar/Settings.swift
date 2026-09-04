@@ -22,7 +22,8 @@ final class Settings {
     var effectMode: EffectMode {
         get {
             let raw = defaults.integer(forKey: Keys.effectMode)
-            return EffectMode(rawValue: raw) ?? .burst
+            // 首次安装默认「折射激光」
+            return EffectMode(rawValue: raw) ?? .laserReflect
         }
         set {
             defaults.set(newValue.rawValue, forKey: Keys.effectMode)
@@ -33,7 +34,8 @@ final class Settings {
     var soundMode: SoundMode {
         get {
             let raw = defaults.integer(forKey: Keys.soundMode)
-            return SoundMode(rawValue: raw) ?? .pentatonic
+            // 首次安装默认「激光枪」
+            return SoundMode(rawValue: raw) ?? .blaster
         }
         set {
             defaults.set(newValue.rawValue, forKey: Keys.soundMode)
@@ -83,20 +85,25 @@ final class Settings {
         }
     }
 
-    /// 当前背景光效模式（默认中心彩条）
+    /// 当前背景光效模式（首次安装默认「边框呼吸灯」）
     var backgroundMode: BackgroundMode {
         get {
-            // 迁移旧版本开关：showCenterGlow = false → 无；true → 中心彩条
+            // 从未设置过：迁移旧开关或给首次安装一个默认
             if defaults.object(forKey: Keys.backgroundMode) == nil {
-                let legacyOff = defaults.object(forKey: "showCenterGlow") != nil
-                    && !defaults.bool(forKey: "showCenterGlow")
-                let migrated: BackgroundMode = legacyOff ? .none : .centerGlow
-                defaults.set(migrated.rawValue, forKey: Keys.backgroundMode)
-                defaults.removeObject(forKey: "showCenterGlow")
-                return migrated
+                // 老版本用户：有 showCenterGlow 键 → 迁移
+                if defaults.object(forKey: "showCenterGlow") != nil {
+                    let legacyOff = !defaults.bool(forKey: "showCenterGlow")
+                    let migrated: BackgroundMode = legacyOff ? .none : .centerGlow
+                    defaults.set(migrated.rawValue, forKey: Keys.backgroundMode)
+                    defaults.removeObject(forKey: "showCenterGlow")
+                    return migrated
+                }
+                // 首次安装：默认边框呼吸灯
+                defaults.set(BackgroundMode.breathingBorder.rawValue, forKey: Keys.backgroundMode)
+                return .breathingBorder
             }
             let raw = defaults.integer(forKey: Keys.backgroundMode)
-            return BackgroundMode(rawValue: raw) ?? .centerGlow
+            return BackgroundMode(rawValue: raw) ?? .breathingBorder
         }
         set {
             defaults.set(newValue.rawValue, forKey: Keys.backgroundMode)

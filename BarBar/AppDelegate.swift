@@ -14,6 +14,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var touchBarView: BarBarView?
     private var aboutController: AboutWindowController?
+    private var donationController: DonationWindowController?
     private var statusPopover: NSPopover?
     private var statusPanelController: StatusPanelViewController?
 
@@ -101,6 +102,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.onOpenAbout = { [weak self] in
             self?.showAbout()
         }
+        panel.onOpenDonation = { [weak self] in
+            self?.showDonation()
+        }
         panel.onQuit = {
             NSApp.terminate(nil)
         }
@@ -124,7 +128,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if statusPopover == nil {
             let popover = NSPopover()
-            popover.behavior = .transient   // 点击外部自动关闭
+            // 用 .semitransient 而不是 .transient：
+            // NSPopUpButton 展开时会弹出独立菜单窗口，transient 会把
+            // 该菜单当作"外部点击"而收起 popover，导致下拉第一次点开就关闭。
+            // semitransient 只在本 app 失活时收起，允许下拉菜单正常展开。
+            popover.behavior = .semitransient
             popover.animates = true
             popover.contentViewController = statusPanelController
             statusPopover = popover
@@ -139,6 +147,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             aboutController = AboutWindowController()
         }
         aboutController?.showWindow(nil)
+        activateApp()
+    }
+
+    @objc private func showDonation() {
+        if donationController == nil {
+            donationController = DonationWindowController()
+        }
+        donationController?.showWindow(nil)
         activateApp()
     }
 
@@ -321,6 +337,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// 触发系统原生的辅助功能授权弹窗（自动打开系统设置），
     /// 同时启动轮询，授权成功后自动开始监听。
     private func requestAccessibilityPermission() {
+        // LSUIElement 菜单栏 app 必须先激活到前台，系统授权弹窗
+        // 才会可靠地出现——否则弹窗可能被静默吞掉，用户看不到。
+        activateApp()
+
         // 系统原生弹窗："BarBar" would like to control this computer using
         // accessibility features. 会自动打开系统设置辅助功能面板。
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary

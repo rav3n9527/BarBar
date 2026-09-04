@@ -37,6 +37,7 @@ SOURCES=(
     "${SRC_DIR}/TouchBarHack.swift"
     "${SRC_DIR}/StatusPanelViewController.swift"
     "${SRC_DIR}/AboutWindowController.swift"
+    "${SRC_DIR}/DonationWindowController.swift"
     "${SRC_DIR}/AppDelegate.swift"
 )
 
@@ -85,6 +86,12 @@ else
     if [ -f "${SRC_DIR}/AppIcon.icns" ]; then
         cp "${SRC_DIR}/AppIcon.icns" "${RESOURCES}/AppIcon.icns"
     fi
+fi
+
+# 复制捐赠二维码资源（若存在）
+if [ -f "${SRC_DIR}/donation-qr.jpg" ]; then
+    cp "${SRC_DIR}/donation-qr.jpg" "${RESOURCES}/donation-qr.jpg"
+    echo "✅ 资源：已复制捐赠二维码"
 fi
 
 echo "✅ 编译完成：${APP_BUNDLE}"

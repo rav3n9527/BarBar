@@ -10,6 +10,7 @@ class StatusPanelViewController: NSViewController {
     // MARK: - 回调（由 AppDelegate 注入）
     var onToggleMonitoring: (() -> Void)?
     var onOpenAbout: (() -> Void)?
+    var onOpenDonation: (() -> Void)?
     var onQuit: (() -> Void)?
 
     private let settings = Settings.shared
@@ -29,6 +30,7 @@ class StatusPanelViewController: NSViewController {
     private let idlePopup = NSPopUpButton()
     private let launchCheckbox = NSButton(checkboxWithTitle: "开机自动启动", target: nil, action: nil)
     private let aboutButton = NSButton(title: "关于", target: nil, action: nil)
+    private let donateButton = NSButton(title: "☕ 投喂", target: nil, action: nil)
     private let quitButton = NSButton(title: "退出", target: nil, action: nil)
 
     private var isMonitoring = false
@@ -170,14 +172,21 @@ class StatusPanelViewController: NSViewController {
         // 底部按钮行
         aboutButton.setButtonType(.momentaryPushIn)
         aboutButton.bezelStyle = .rounded
-        aboutButton.frame = NSRect(x: 16, y: 36, width: 128, height: 28)
+        aboutButton.frame = NSRect(x: 16, y: 36, width: 82, height: 28)
         aboutButton.target = self
         aboutButton.action = #selector(aboutClicked)
         view.addSubview(aboutButton)
 
+        donateButton.setButtonType(.momentaryPushIn)
+        donateButton.bezelStyle = .rounded
+        donateButton.frame = NSRect(x: 106, y: 36, width: 88, height: 28)
+        donateButton.target = self
+        donateButton.action = #selector(donateClicked)
+        view.addSubview(donateButton)
+
         quitButton.setButtonType(.momentaryPushIn)
         quitButton.bezelStyle = .rounded
-        quitButton.frame = NSRect(x: 156, y: 36, width: 128, height: 28)
+        quitButton.frame = NSRect(x: 202, y: 36, width: 82, height: 28)
         quitButton.target = self
         quitButton.action = #selector(quitClicked)
         view.addSubview(quitButton)
@@ -451,6 +460,10 @@ class StatusPanelViewController: NSViewController {
 
     @objc private func aboutClicked() {
         onOpenAbout?()
+    }
+
+    @objc private func donateClicked() {
+        onOpenDonation?()
     }
 
     @objc private func quitClicked() {
